@@ -1,0 +1,58 @@
+version: '3'
+
+vars:
+  CONDA_ENV_NAME: chat-openapi
+  PYTHON_VERSION: "3.11"
+
+tasks:
+  init-conda:
+    desc: Initialize conda for shell
+    cmds:
+      - cmd: |
+          /home/jarancibia/anaconda3/bin/conda init bash
+          echo 'Please restart your shell or run: source ~/.bashrc'
+
+  create-env:
+    desc: Create conda environment
+    cmds:
+      - cmd: conda create -n {{.CONDA_ENV_NAME}} python={{.PYTHON_VERSION}} -y
+
+  install-deps:
+    desc: Install project dependencies
+    cmds:
+      - cmd: conda run -n {{.CONDA_ENV_NAME}} pip install -r backend/requirements.txt
+        platforms: [linux, darwin]
+      - cmd: conda run -n {{.CONDA_ENV_NAME}} pip install -r backend/requirements.txt
+        platforms: [windows]
+
+  setup:
+    desc: Setup complete environment (create and install dependencies)
+    cmds:
+      - task: init-conda
+      - task: create-env
+      - task: install-deps
+      - cmd: |
+          echo 'Environment setup complete! Please restart your shell or run: source ~/.bashrc'
+          echo 'Then activate the environment with: conda activate {{.CONDA_ENV_NAME}}'
+
+  clean:
+    desc: Remove conda environment
+    cmds:
+      - cmd: conda env remove -n {{.CONDA_ENV_NAME}} -y
+
+  clean-base:
+    desc: Remove accidentally installed packages from base environment
+    cmds:
+      - cmd: |
+          /home/jarancibia/anaconda3/bin/pip uninstall -y fastapi uvicorn python-dotenv python-multipart \
+          qdrant-client pydantic pydantic-settings httpx rich grpcio grpcio-tools portalocker protobuf \
+          starlette anyio
+
+  activate:
+    desc: Print the command to activate the environment
+    silent: true
+    cmds:
+      - cmd: |
+          echo 'To activate the environment:'
+          echo '1. First restart your shell or run: source ~/.bashrc'
+          echo '2. Then run: conda activate {{.CONDA_ENV_NAME}}'
