@@ -129,22 +129,51 @@ class OpenRouterService:
             async with self.client.stream(
                 "POST",
                 "/chat/completions",
-                json=payload
+                json=payload,
+                timeout=60.0  # Increased timeout for streaming
             ) as response:
                 if response.status_code >= 400:
+                    error_text = await response.text()
+                    logger.error(f"Error from OpenRouter API: {error_text}")
                     response.raise_for_status()
                 
+                buffer = []  # Buffer to accumulate tokens
                 async for line in response.aiter_lines():
-                    if line.startswith("data: "):
-                        if line.strip() == "data: [DONE]":
-                            break
+                    if not line or not line.startswith("data: "):
+                        continue
+                        
+                    line = line.removeprefix("data: ")
+                    if line == "[DONE]":
+                        if buffer:  # Yield any remaining buffered content
+                            yield "".join(buffer)
+                        break
+                        
+                    try:
+                        data = json.loads(line)
+                        if not isinstance(data, dict):
+                            continue
                             
-                        data = json.loads(line[6:])  # Skip "data: " prefix
-                        if content := data["choices"][0]["delta"].get("content"):
-                            yield content
+                        choices = data.get("choices", [])
+                        if not choices:
+                            continue
+                            
+                        delta = choices[0].get("delta", {})
+                        if content := delta.get("content"):
+                            buffer.append(content)
+                            # Only yield when we have a reasonable amount of text
+                            if len("".join(buffer)) >= 20 or any(c in content for c in [".", "!", "?", "\n"]):
+                                yield "".join(buffer)
+                                buffer = []
+                            
+                    except json.JSONDecodeError:
+                        logger.warning(f"Failed to decode line: {line}")
+                        continue
+                    except Exception as e:
+                        logger.error(f"Error processing chunk: {e}")
+                        continue
                             
         except Exception as e:
-            logger.error(f"Error during streaming chat completion: {str(e)}")
+            logger.error(f"Error during streaming chat completion: {e}")
             raise
 
     async def close(self):

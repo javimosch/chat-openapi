@@ -4,6 +4,7 @@ CLI tool for managing OpenAPI specifications in the chat-openapi system.
 """
 import os
 import sys
+import asyncio
 from pathlib import Path
 from typing import Optional, List
 from datetime import datetime
@@ -11,14 +12,15 @@ from datetime import datetime
 import click
 from rich.console import Console
 from rich.table import Table
+from rich.markdown import Markdown
+from rich.text import Text
+from rich.panel import Panel
+from rich.syntax import Syntax
 from tabulate import tabulate
 
 from app.core.logging import get_logger
 from app.services.file_service import FileService
 from app.services.vector_storage import VectorStorageService
-
-import asyncio
-from starlette.datastructures import UploadFile
 
 logger = get_logger(__name__)
 console = Console()
@@ -31,6 +33,24 @@ def get_uploads_dir() -> Path:
     """Get the uploads directory path."""
     return Path("uploads")
 
+def run_async(coro):
+    """Run an async function in the event loop."""
+    try:
+        loop = asyncio.get_event_loop()
+    except RuntimeError:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+    return loop.run_until_complete(coro)
+
+def async_command(f):
+    """Decorator to run async click commands."""
+    def decorator(*args, **kwargs):
+        return run_async(f(*args, **kwargs))
+    # Preserve the original function's metadata
+    decorator.__name__ = f.__name__
+    decorator.__doc__ = f.__doc__
+    return click.command()(decorator)
+
 @click.group()
 def cli():
     """Chat-OpenAPI CLI - Manage your OpenAPI specifications."""
@@ -38,18 +58,11 @@ def cli():
     uploads_dir = get_uploads_dir()
     uploads_dir.mkdir(exist_ok=True)
 
-def run_async(coro):
-    """Run an async function in the event loop."""
-    loop = asyncio.get_event_loop()
-    return loop.run_until_complete(coro)
-
 @cli.command()
 @click.argument('file_path', type=click.Path(exists=True))
 def upload(file_path: str):
     """Upload a specification file"""
     try:
-        file_service = FileService()
-        
         # Create UploadFile from path
         file_name = Path(file_path).name
         with open(file_path, 'rb') as f:
@@ -83,9 +96,6 @@ def upload(file_path: str):
 def info(spec_id: str):
     """Show detailed information about a specification"""
     try:
-        file_service = FileService()
-        vector_service = VectorStorageService()
-        
         # Get file info
         file_info = file_service.get_file_info(spec_id)
         
@@ -108,9 +118,6 @@ def info(spec_id: str):
 def list():
     """List all specifications"""
     try:
-        file_service = FileService()
-        vector_service = VectorStorageService()
-        
         specs = file_service.list_files()
         
         # Create table
@@ -168,8 +175,6 @@ def export(spec_id: str, output: Optional[str] = None):
 def delete(spec_id: str):
     """Remove a specification and its associated chunks"""
     try:
-        file_service = FileService()
-        
         # Delete file and chunks
         asyncio.run(file_service.delete_file(spec_id))
         
@@ -215,6 +220,128 @@ def vector_size(detailed: bool):
         logger.error(f"Error getting vector database size: {str(e)}")
         console.print(f"[red]Error: {str(e)}[/red]")
         sys.exit(1)
+
+@cli.group()
+def chat():
+    """Chat with your OpenAPI specifications."""
+    pass
+
+@chat.command(name="ask")
+@click.argument("question")
+@click.option("--show-context", is_flag=True, help="Show the context used for the answer")
+def ask(question: str, show_context: bool):
+    """Ask a single question."""
+    async def _ask():
+        try:
+            from app.services.rag_service import RAGService
+            from app.services.openrouter_service import OpenRouterService
+            
+            # Initialize services
+            rag_service = RAGService(vector_service, OpenRouterService())
+            
+            try:
+                # Get response with context if requested
+                if show_context:
+                    response_gen, context = await rag_service.get_response_with_context(question)
+                    
+                    # Show context first
+                    console.print("\n[bold blue]Context used:[/bold blue]")
+                    for ctx in context:
+                        console.print(Panel(ctx, border_style="blue"))
+                    console.print()
+                    
+                    # Show response with live updating
+                    console.print("\n[bold green]Response:[/bold green]")
+                    buffer = []
+                    with console.status("[bold]Generating response...[/bold]"):
+                        async for chunk in response_gen:
+                            buffer.append(chunk)
+                            # Clear line and print updated markdown
+                            print("\033[2K\033[G", end="")  # Clear current line
+                            console.print(Markdown("".join(buffer)), soft_wrap=True)
+                else:
+                    # Show response with live updating
+                    console.print("\n[bold green]Response:[/bold green]")
+                    buffer = []
+                    with console.status("[bold]Generating response...[/bold]"):
+                        async for chunk in rag_service.generate_response(question):
+                            buffer.append(chunk)
+                            # Clear line and print updated markdown
+                            print("\033[2K\033[G", end="")  # Clear current line
+                            console.print(Markdown("".join(buffer)), soft_wrap=True)
+                    
+            except Exception as e:
+                console.print(f"\n[red]Error generating response: {str(e)}[/red]")
+
+        except Exception as e:
+            console.print(f"[red]Error starting chat session: {str(e)}[/red]")
+            sys.exit(1)
+
+    return run_async(_ask())
+
+@chat.command(name="interactive")
+@click.option("--show-context", is_flag=True, help="Show the context used for answers")
+def interactive(show_context: bool):
+    """Start an interactive chat session."""
+    async def _interactive():
+        try:
+            from app.services.rag_service import RAGService
+            from app.services.openrouter_service import OpenRouterService
+            
+            # Initialize services
+            rag_service = RAGService(vector_service, OpenRouterService())
+            
+            console.print("[bold]Starting chat session. Type 'exit' to quit.[/bold]")
+            
+            while True:
+                # Get user input
+                query = click.prompt("\nYou")
+                
+                if query.lower() in ['exit', 'quit']:
+                    break
+
+                if not query.strip():
+                    continue
+
+                try:
+                    # Get response with context if requested
+                    if show_context:
+                        response_gen, context = await rag_service.get_response_with_context(query)
+                        
+                        # Show context first
+                        console.print("\n[bold blue]Context used:[/bold blue]")
+                        for ctx in context:
+                            console.print(Panel(ctx, border_style="blue"))
+                        console.print()
+                        
+                        # Show response with live updating
+                        console.print("\n[bold green]Response:[/bold green]")
+                        buffer = []
+                        with console.status("[bold]Generating response...[/bold]"):
+                            async for chunk in response_gen:
+                                buffer.append(chunk)
+                                # Clear line and print updated markdown
+                                print("\033[2K\033[G", end="")  # Clear current line
+                                console.print(Markdown("".join(buffer)), soft_wrap=True)
+                    else:
+                        # Show response with live updating
+                        console.print("\n[bold green]Response:[/bold green]")
+                        buffer = []
+                        with console.status("[bold]Generating response...[/bold]"):
+                            async for chunk in rag_service.generate_response(query):
+                                buffer.append(chunk)
+                                # Clear line and print updated markdown
+                                print("\033[2K\033[G", end="")  # Clear current line
+                                console.print(Markdown("".join(buffer)), soft_wrap=True)
+                        
+                except Exception as e:
+                    console.print(f"[red]Error: {str(e)}[/red]")
+
+        except Exception as e:
+            console.print(f"[red]Error starting chat session: {str(e)}[/red]")
+            sys.exit(1)
+
+    return run_async(_interactive())
 
 if __name__ == '__main__':
     cli()
