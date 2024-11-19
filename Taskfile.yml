@@ -5,6 +5,14 @@ vars:
   PYTHON_VERSION: "3.11"
 
 tasks:
+  test-openrouter:
+    desc: Run OpenRouter tests
+    method: timestamp
+    cmds:
+      - cmd: |
+          export PYTHONPATH=/home/jarancibia/Documents/repos/chat-openapi/backend
+          python3.11 -m pytest -v ./backend/tests/services/test_openrouter_service.py
+
   init-conda:
     desc: Initialize conda for shell
     cmds:
