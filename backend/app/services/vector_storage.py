@@ -10,6 +10,8 @@ import time
 import psutil
 import gc
 from functools import wraps
+import json
+from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
@@ -263,8 +265,39 @@ class VectorStorageService:
             logger.error(f"Error getting chunk count: {str(e)}")
             raise
 
+    async def list_specs(self) -> List[str]:
+        """List all unique spec_ids in the collection."""
+        try:
+            # Search with empty query to get all points
+            scroll_iter = self.client.scroll(
+                collection_name=self.collection_name,
+                limit=100,  # Process in smaller batches
+                with_payload=True,
+                with_vectors=False
+            )
+            
+            # Extract unique spec_ids from results
+            spec_ids = set()
+            
+            # Process each batch
+            # scroll returns (points, next_page_offset, total)
+            for batch in scroll_iter:
+                points = batch[0]  # First element is the points list
+                for point in points:
+                    if hasattr(point, 'payload') and point.payload:
+                        spec_id = point.payload.get('spec_id')
+                        if spec_id:
+                            spec_ids.add(spec_id)
+            
+            return list(spec_ids)
+            
+        except Exception as e:
+            logger.error(f"Error listing specs: {str(e)}")
+            raise
+
     async def get_collection_size(self) -> Dict[str, float]:
         """Get the size of the vector database collection in MB.
+        Uses theoretical calculation based on embedding configuration and processed files.
         
         Returns:
             Dict with size breakdown:
@@ -276,31 +309,9 @@ class VectorStorageService:
             }
         """
         try:
-            # Get collection info using collections API
-            collection_info = self.client.get_collection(
-                collection_name=self.collection_name
-            )
-            
-            # Convert bytes to MB
-            bytes_to_mb = lambda x: round(x / (1024 * 1024), 2)
-            
-            # Get vector config and count
-            vector_size = collection_info.config.params.vectors.size
-            vector_count = collection_info.vectors_count or 0
-            
-            # Calculate sizes
-            vectors_size = bytes_to_mb(vector_size * vector_count * 4)  # 4 bytes per float
-            
-            # Get index size (approximation based on vector count)
-            index_size = bytes_to_mb(vector_size * vector_count * 0.1)  # Index is typically ~10% of vector size
-            
-            # Get payload size (approximation based on vector count)
-            payload_size = bytes_to_mb(vector_count * 0.5 * 1024)  # Assume average 0.5KB per vector for metadata
-            
-            total_size = vectors_size + index_size + payload_size
-            
-            # If total size is very small, return minimum values
-            if total_size < 0.01:
+            # Get all files in uploads directory
+            upload_dir = Path("uploads")
+            if not upload_dir.exists():
                 return {
                     'total': 0.01,
                     'vectors': 0.01,
@@ -308,22 +319,68 @@ class VectorStorageService:
                     'metadata': 0.00
                 }
             
-            # Ensure optimizer_config.max_optimization_threads is a valid integer
-            optimizer_config = collection_info.config.optimizer_config
-            if optimizer_config.max_optimization_threads is None:
-                optimizer_config.max_optimization_threads = 0
+            # Count total chunks based on file sizes and average chunk size
+            total_chunks = 0
+            total_files = 0
             
-            # Ensure strict_mode_config does not contain extra fields
-            if 'strict_mode_config' in collection_info.config:
-                del collection_info.config['strict_mode_config']
+            # Process each OpenAPI spec file
+            for file_path in upload_dir.glob("*.json"):
+                try:
+                    # Read file content to estimate chunks
+                    content = file_path.read_text()
+                    spec = json.loads(content)
+                    
+                    # Estimate chunks based on paths and components
+                    paths = len(spec.get('paths', {}))
+                    components = len(spec.get('components', {}).get('schemas', {}))
+                    
+                    # Each path typically generates 2-3 chunks
+                    # Each component typically generates 1-2 chunks
+                    estimated_chunks = (paths * 3) + (components * 2)
+                    total_chunks += estimated_chunks
+                    total_files += 1
+                    
+                except Exception as e:
+                    logger.warning(f"Error processing file {file_path}: {str(e)}")
+                    continue
+            
+            logger.info(f"Found {total_chunks} estimated chunks across {total_files} specifications")
+            
+            # Calculate sizes based on our configuration
+            bytes_to_mb = lambda x: round(x / (1024 * 1024), 2)
+            
+            # Vector size calculation:
+            # - Each dimension is a float32 (4 bytes)
+            # - Number of dimensions from model config
+            vector_bytes = total_chunks * settings.VECTOR_DIMENSION * 4
+            vectors_size = bytes_to_mb(vector_bytes)
+            
+            # Index size (approximate as 10% of vector size)
+            index_size = bytes_to_mb(vector_bytes * 0.1)
+            
+            # Metadata size calculation:
+            # - Each chunk has metadata (spec_id, chunk_id, position)
+            # - Average metadata size per chunk (500 bytes)
+            metadata_size = bytes_to_mb(total_chunks * 500)
+            
+            total_size = vectors_size + index_size + metadata_size
+            
+            # If no chunks, return minimum values
+            if total_chunks == 0:
+                return {
+                    'total': 0.01,
+                    'vectors': 0.01,
+                    'index': 0.00,
+                    'metadata': 0.00
+                }
             
             return {
                 'total': round(total_size, 2),
                 'vectors': round(vectors_size, 2),
                 'index': round(index_size, 2),
-                'metadata': round(payload_size, 2)
+                'metadata': round(metadata_size, 2)
             }
             
         except Exception as e:
-            logger.error(f"Error getting collection size: {str(e)}")
+            logger.error(f"Error calculating vector storage size: {str(e)}")
             raise
