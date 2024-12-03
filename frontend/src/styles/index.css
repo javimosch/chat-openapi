@@ -1,0 +1,25 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Custom styles */
+.prose pre {
+  @apply bg-gray-800 text-gray-100 rounded-lg p-4 my-2 overflow-x-auto;
+}
+
+.prose code {
+  @apply bg-gray-100 px-1 py-0.5 rounded text-sm;
+}
+
+.prose pre code {
+  @apply bg-transparent p-0;
+}
+
+/* Dark mode message styles */
+.dark .message-user {
+  @apply bg-blue-600;
+}
+
+.dark .message-assistant {
+  @apply bg-gray-700 text-gray-100;
+}
