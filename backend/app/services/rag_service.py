@@ -59,7 +59,7 @@ class RAGService:
    ```
    [HTTP METHOD] [PATH]
    Description: [Brief description]
-   Parameters: [Required parameters]
+   Parameters: [List all parameters, including optional ones]
    Authentication: [Auth requirements if any]
    ```
 3. Always include the complete endpoint path

@@ -122,7 +122,7 @@ def list():
         
         # Create table
         table = Table(show_header=True, header_style="bold")
-        table.add_column("ID")
+        table.add_column("ID", overflow="fold")  # Allow ID column to wrap text
         table.add_column("Name")
         table.add_column("Size")
         table.add_column("Chunks")
@@ -252,23 +252,17 @@ def ask(question: str, show_context: bool):
                     
                     # Show response with live updating
                     console.print("\n[bold green]Response:[/bold green]")
-                    buffer = []
                     with console.status("[bold]Generating response...[/bold]"):
                         async for chunk in response_gen:
-                            buffer.append(chunk)
-                            # Clear line and print updated markdown
-                            print("\033[2K\033[G", end="")  # Clear current line
-                            console.print(Markdown("".join(buffer)), soft_wrap=True)
+                            # Print new chunk without clearing lines
+                            console.print(Markdown(chunk), soft_wrap=True)
                 else:
                     # Show response with live updating
                     console.print("\n[bold green]Response:[/bold green]")
-                    buffer = []
                     with console.status("[bold]Generating response...[/bold]"):
                         async for chunk in rag_service.generate_response(question):
-                            buffer.append(chunk)
-                            # Clear line and print updated markdown
-                            print("\033[2K\033[G", end="")  # Clear current line
-                            console.print(Markdown("".join(buffer)), soft_wrap=True)
+                            # Print new chunk without clearing lines
+                            console.print(Markdown(chunk), soft_wrap=True)
                     
             except Exception as e:
                 console.print(f"\n[red]Error generating response: {str(e)}[/red]")

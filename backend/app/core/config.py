@@ -1,5 +1,6 @@
 from pydantic_settings import BaseSettings
 from typing import Optional
+from pathlib import Path
 
 class Settings(BaseSettings):
     # API Settings
@@ -35,7 +36,7 @@ class Settings(BaseSettings):
     MAX_CONTEXT_LENGTH: int = 4000
 
     class Config:
-        env_file = ".env"
+        env_file = [".env", "../.env"]  # Look for .env in current and parent directory
         case_sensitive = True
         extra = "allow"  # Allow extra fields from .env
 

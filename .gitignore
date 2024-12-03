@@ -3,6 +3,7 @@
 .env.*
 !.env.example
 uploads
+spec.json
 # Python
 __pycache__/
 *.py[cod]
