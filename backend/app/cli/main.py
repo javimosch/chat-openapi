@@ -58,22 +58,30 @@ def cli():
     uploads_dir = get_uploads_dir()
     uploads_dir.mkdir(exist_ok=True)
 
+class CLIUploadFile:
+    def __init__(self, filename: str, file_obj):
+        self.filename = filename
+        self._file = file_obj
+        
+    async def read(self, size: int = -1):
+        return self._file.read(size)
+
 @cli.command()
 @click.argument('file_path', type=click.Path(exists=True))
 def upload(file_path: str):
     """Upload a specification file"""
     try:
-        # Create UploadFile from path
+        # Create CLIUploadFile from path
         file_name = Path(file_path).name
         with open(file_path, 'rb') as f:
-            file = UploadFile(filename=file_name, file=f)
+            file = CLIUploadFile(filename=file_name, file_obj=f)
             
             # Process the file
             result = asyncio.run(file_service.process_file(file))
             
             # Display results
             console.print(f"Successfully uploaded {file_name}")
-            console.print(f"Specification ID: \n{result['spec_id']}")
+            console.print(f"Specification ID: {result['spec_id']}")
             
             # Create table
             table = Table(show_header=True)
@@ -314,9 +322,10 @@ def interactive(show_context: bool):
                         with console.status("[bold]Generating response...[/bold]"):
                             async for chunk in response_gen:
                                 buffer.append(chunk)
-                                # Clear line and print updated markdown
-                                print("\033[2K\033[G", end="")  # Clear current line
-                                console.print(Markdown("".join(buffer)), soft_wrap=True)
+                                # Print just the new chunk
+                                console.print(chunk, end="", soft_wrap=True)
+                        # Print a newline at the end
+                        console.print()
                     else:
                         # Show response with live updating
                         console.print("\n[bold green]Response:[/bold green]")
@@ -324,9 +333,10 @@ def interactive(show_context: bool):
                         with console.status("[bold]Generating response...[/bold]"):
                             async for chunk in rag_service.generate_response(query):
                                 buffer.append(chunk)
-                                # Clear line and print updated markdown
-                                print("\033[2K\033[G", end="")  # Clear current line
-                                console.print(Markdown("".join(buffer)), soft_wrap=True)
+                                # Print just the new chunk
+                                console.print(chunk, end="", soft_wrap=True)
+                        # Print a newline at the end
+                        console.print()
                         
                 except Exception as e:
                     console.print(f"[red]Error: {str(e)}[/red]")
