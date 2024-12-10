@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
-import ReactMarkdown from 'react-markdown';
 import { Conversation, Message } from '../types';
+import { marked } from 'marked'; // Import the marked library
 
 interface ChatAreaProps {
   conversation: Conversation | null;
@@ -46,23 +46,28 @@ const ChatArea: React.FC<ChatAreaProps> = ({
     }
   };
 
+  const isMarkdown = (text: string) => {
+    // Simple check for markdown syntax
+    return text.startsWith('#') || text.startsWith('*') || text.includes('**') || text.includes('__');
+  };
+
   return (
-    <div className="max-w-3xl w-full flex flex-col h-full">
+    <div className="w-full flex flex-col h-full">
       {/* Header */}
-      <div className="p-4 border-b border-gray-200 flex justify-between items-center">
+      <div className="p-4 border-b border-gray-200 flex justify-between items-center bg-gray-50 shadow">
         <div className="flex items-center">
           <div
             className={`w-2 h-2 rounded-full mr-2 ${
               connectionStatus === 'connected' ? 'bg-green-500' : 'bg-red-500'
             }`}
           />
-          <span className="text-sm text-gray-500">
+          <span className="text-sm text-gray-700 font-semibold">
             {connectionStatus === 'connected' ? 'Connected' : 'Disconnected'}
           </span>
         </div>
         <button
           onClick={onToggleContext}
-          className="text-sm text-gray-500 hover:text-gray-700"
+          className="text-sm text-blue-600 hover:text-blue-800 font-semibold"
         >
           {showContext ? 'Hide Context' : 'Show Context'}
         </button>
@@ -80,11 +85,13 @@ const ChatArea: React.FC<ChatAreaProps> = ({
                 msg.role === 'user'
                   ? 'bg-blue-500 text-white'
                   : 'bg-gray-100 text-gray-900'
-              }`}
+              } shadow-md`}
             >
-              <ReactMarkdown className="prose prose-sm max-w-none">
-                {msg.content}
-              </ReactMarkdown>
+              {isMarkdown(msg.content) ? (
+                <div dangerouslySetInnerHTML={{ __html: marked(msg.content) }} />
+              ) : (
+                <span>{msg.content}</span>
+              )}
             </div>
           </div>
         ))}
@@ -103,7 +110,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({
       </div>
 
       {/* Input */}
-      <div className="p-4 border-t border-gray-200">
+      <div className="p-4 border-t border-gray-200 bg-gray-50">
         <form onSubmit={handleSubmit} className="flex space-x-4">
           <textarea
             value={message}

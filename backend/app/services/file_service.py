@@ -9,8 +9,8 @@ from datetime import datetime
 from ..core.logging import logger
 from ..core.utils import log_function
 from ..models.openapi import OpenAPISpec
-from app.services.chunking_service import OpenAPIChunker
-from app.services.vector_storage import VectorStorageService
+from .chunking_service import OpenAPIChunker
+from .vector_storage import VectorStorageService
 
 class FileService:
     """Service for handling file operations."""

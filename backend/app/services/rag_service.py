@@ -121,7 +121,7 @@ class RAGService:
                     buffer.append(token)
                     # Only yield when we have a complete sentence or reasonable chunk
                     combined = "".join(buffer)
-                    if len(combined) >= 100 or any(c in token for c in [".", "!", "?", "\n"]):
+                    if any(c in token for c in [ "\n"]): #".", "!", "?",
                         yield combined
                         buffer = []
                 if buffer:  # Yield any remaining buffered content
@@ -172,3 +172,4 @@ class RAGService:
             async def error_stream():
                 yield f"I encountered an error while generating the response: {str(e)}"
             return error_stream(), []
+</file_content>

@@ -1,12 +1,14 @@
 import { useState, useEffect, useCallback } from 'react';
 import { WebSocketMessage } from '../types';
 
-const WS_URL = process.env.REACT_APP_WS_URL || 'ws://localhost:8000/chat/ws';
+const WS_URL = process.env.REACT_APP_WS_URL || 'ws://localhost:8000/ws';
 
 export function useWebSocket() {
   const [ws, setWs] = useState<WebSocket | null>(null);
   const [isConnected, setIsConnected] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [messageBuffer, setMessageBuffer] = useState<string>(''); // Buffer for accumulating message content
+  const [lastMessage, setLastMessage] = useState<WebSocketMessage | null>(null);
 
   const connect = useCallback(() => {
     try {
@@ -20,7 +22,6 @@ export function useWebSocket() {
 
       socket.onclose = () => {
         setIsConnected(false);
-        // Attempt to reconnect after 3 seconds
         setTimeout(connect, 3000);
       };
 
@@ -58,18 +59,40 @@ export function useWebSocket() {
     ws.onmessage = (event) => {
       try {
         const message = JSON.parse(event.data) as WebSocketMessage;
-        onMessage(message);
+        if (message.type === 'stream') {
+          // Accumulate message content
+          setMessageBuffer(prev => prev + (message.content || ''));
+        } else if (message.type === 'token') {
+          // Handle complete message
+          const completeMessage: WebSocketMessage = {
+            ...message,
+            content: messageBuffer + (message.content || ''),
+          };
+          setLastMessage(completeMessage);
+          onMessage(completeMessage);
+          setMessageBuffer(''); // Clear buffer after sending complete message
+        } else if (message.type === 'end') {
+          // Handle end of message stream
+          const finalMessage: WebSocketMessage = {
+            type: 'final',
+            content: messageBuffer,
+          };
+          setLastMessage(finalMessage);
+          onMessage(finalMessage);
+          setMessageBuffer(''); // Clear buffer after final message
+        }
       } catch (err) {
         console.error('Failed to parse WebSocket message:', err);
       }
     };
-  }, [ws]);
+  }, [ws, messageBuffer]);
 
   return {
     isConnected,
     error,
     sendMessage,
     subscribeToMessages,
+    lastMessage,
   };
 }
 

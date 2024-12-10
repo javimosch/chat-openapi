@@ -1,9 +1,9 @@
 from fastapi import WebSocket, WebSocketDisconnect
-from typing import List, Dict, Any
+from typing import List
 import json
 import logging
 from ...services.rag_service import RAGService
-from ...services.openrouter_service import OpenRouterService
+from ...services.openrouter_service import OpenRouterService, ChatMessage
 
 logger = logging.getLogger(__name__)
 
@@ -51,44 +51,41 @@ async def handle_chat_websocket(
     openrouter_service: OpenRouterService
 ):
     """Handle WebSocket connection for chat."""
+    logger.info(f'WebSocket connection attempt from origin: {websocket.headers.get("origin")}')
+    logger.info(f'WebSocket headers: {websocket.headers}')
     try:
         await manager.connect(websocket)
-        
-        while True:
-            try:
-                # Receive message from client
-                data = await websocket.receive_text()
-                message_data = json.loads(data)
-                user_message = message_data.get("content", "")
+        logger.info('WebSocket connection accepted')
 
-                if not user_message.strip():
-                    continue
+        async with openrouter_service as service:
+            while True:
+                try:
+                    # Receive message from client
+                    data = await websocket.receive_text()
+                    logger.info(f'Received data: {data}')
+                    message_data = json.loads(data)
+                    user_message = message_data.get("content", "")
 
-                # Get context from RAG service
-                context = await rag_service.get_relevant_context(user_message)
-                
-                # Stream response using OpenRouter
-                async for token in openrouter_service.stream_chat_response(
-                    user_message,
-                    context=context
-                ):
-                    await stream_handler(token, websocket)
-                
-                # Send end message
-                await manager.send_end(websocket)
+                    if not user_message.strip():
+                        continue
 
-            except json.JSONDecodeError:
-                await manager.send_error("Invalid message format", websocket)
-            except Exception as e:
-                logger.error(f"Error processing message: {e}")
-                await manager.send_error(str(e), websocket)
+                    # Generate response using RAG service
+                    async for token in rag_service.generate_response(user_message):
+                        await stream_handler(token, websocket)
+                    
+                    # Send end message
+                    await manager.send_end(websocket)
+                    logger.info('End message sent')
+
+                except json.JSONDecodeError:
+                    await manager.send_error("Invalid message format", websocket)
+                    logger.error('Invalid message format received')
+                except Exception as e:
+                    logger.error(f'Error processing message: {e}')
+                    await manager.send_error(str(e), websocket)
 
     except WebSocketDisconnect:
         manager.disconnect(websocket)
+        logger.info('WebSocket disconnected')
     except Exception as e:
-        logger.error(f"WebSocket error: {e}")
-        try:
-            await manager.send_error(str(e), websocket)
-            manager.disconnect(websocket)
-        except:
-            pass
+        logger.error(f'WebSocket connection error: {e}')

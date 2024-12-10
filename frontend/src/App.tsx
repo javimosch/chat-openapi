@@ -3,20 +3,22 @@ import ChatArea from './components/ChatArea';
 import Sidebar from './components/Sidebar';
 import useWebSocket from './hooks/useWebSocket';
 import { Conversation, Message, WebSocketMessage } from './types';
+import { v4 as uuidv4 } from 'uuid';
 
 const App: React.FC = () => {
-  const [conversations, setConversations] = useState<Conversation[]>([]);
+  const [conversations, setConversations] = useState<Map<string, Conversation>>(new Map());
   const [currentConversation, setCurrentConversation] = useState<Conversation | null>(null);
   const [showContext, setShowContext] = useState<boolean>(true);
+  const [isStreaming, setIsStreaming] = useState<boolean>(false);
 
-  const { sendMessage, lastMessage, connectionStatus } = useWebSocket();
+  const { sendMessage, lastMessage, isConnected, subscribeToMessages } = useWebSocket();
 
   useEffect(() => {
-    // Load conversations from localStorage on component mount
     const savedConversations = localStorage.getItem('conversations');
     if (savedConversations) {
-      const parsed = JSON.parse(savedConversations);
-      setConversations(parsed);
+      const parsed: Conversation[] = JSON.parse(savedConversations);
+      const conversationMap = new Map(parsed.map(conv => [conv.id, conv]));
+      setConversations(conversationMap);
       if (parsed.length > 0) {
         setCurrentConversation(parsed[0]);
       }
@@ -24,35 +26,55 @@ const App: React.FC = () => {
   }, []);
 
   useEffect(() => {
-    // Save conversations to localStorage whenever they change
-    localStorage.setItem('conversations', JSON.stringify(conversations));
+    localStorage.setItem('conversations', JSON.stringify(Array.from(conversations.values())));
   }, [conversations]);
 
   useEffect(() => {
-    if (lastMessage && currentConversation) {
-      const wsMessage = JSON.parse(lastMessage) as WebSocketMessage;
-      
-      if (wsMessage.type === 'stream') {
-        // Update the last message in the current conversation with the streamed content
-        setConversations(prevConversations => {
-          return prevConversations.map(conv => {
-            if (conv.id === currentConversation.id) {
-              const updatedMessages = [...conv.messages];
-              const lastMessageIndex = updatedMessages.length - 1;
-              if (lastMessageIndex >= 0) {
-                updatedMessages[lastMessageIndex] = {
-                  ...updatedMessages[lastMessageIndex],
-                  content: updatedMessages[lastMessageIndex].content + wsMessage.content
+    if (isConnected) {
+      subscribeToMessages((message: WebSocketMessage) => {
+        console.log('Message received:', message);
+        if (message.type === 'stream') {
+          setIsStreaming(true);
+        } else if (message.type === 'token' && currentConversation) {
+          setConversations(prevConversations => {
+            const updatedConversations = new Map(prevConversations);
+            const conv = updatedConversations.get(currentConversation.id);
+            if (conv) {
+              const lastMessageIndex = conv.messages.length - 1;
+              if (lastMessageIndex >= 0 && conv.messages[lastMessageIndex].role === 'assistant') {
+                conv.messages[lastMessageIndex].content += message.content || '';
+              } else {
+                const assistantMessage: Message = {
+                  id: uuidv4(),
+                  role: 'assistant',
+                  content: message.content || '',
+                  created_at: new Date().toISOString(),
+                  timestamp: Date.now(),
                 };
+                conv.messages.push(assistantMessage);
               }
-              return { ...conv, messages: updatedMessages };
+              updatedConversations.set(currentConversation.id, { ...conv });
             }
-            return conv;
+            return updatedConversations;
           });
-        });
-      }
+        } else if (message.type === 'final' && currentConversation) {
+          setConversations(prevConversations => {
+            const updatedConversations = new Map(prevConversations);
+            const conv = updatedConversations.get(currentConversation.id);
+            if (conv) {
+              const lastMessageIndex = conv.messages.length - 1;
+              if (lastMessageIndex >= 0 && conv.messages[lastMessageIndex].role === 'assistant') {
+                conv.messages[lastMessageIndex].content += message.content || '';
+              }
+              updatedConversations.set(currentConversation.id, { ...conv });
+            }
+            return updatedConversations;
+          });
+          setIsStreaming(false);
+        }
+      });
     }
-  }, [lastMessage, currentConversation]);
+  }, [isConnected, subscribeToMessages, currentConversation]);
 
   const createNewConversation = () => {
     const newConversation: Conversation = {
@@ -60,8 +82,10 @@ const App: React.FC = () => {
       title: 'New Conversation',
       messages: [],
       created_at: new Date().toISOString(),
+      timestamp: Date.now(),
+      lastUpdated: Date.now(),
     };
-    setConversations([newConversation, ...conversations]);
+    setConversations(prevConversations => new Map(prevConversations).set(newConversation.id, newConversation));
     setCurrentConversation(newConversation);
   };
 
@@ -69,32 +93,25 @@ const App: React.FC = () => {
     if (!currentConversation) return;
 
     const userMessage: Message = {
-      id: Date.now().toString(),
+      id: uuidv4(),
       role: 'user',
       content,
       created_at: new Date().toISOString(),
-    };
-
-    const assistantMessage: Message = {
-      id: (Date.now() + 1).toString(),
-      role: 'assistant',
-      content: '',
-      created_at: new Date().toISOString(),
+      timestamp: Date.now(),
     };
 
     setConversations(prevConversations => {
-      return prevConversations.map(conv => {
-        if (conv.id === currentConversation.id) {
-          return {
-            ...conv,
-            messages: [...conv.messages, userMessage, assistantMessage],
-          };
-        }
-        return conv;
-      });
+      const updatedConversations = new Map(prevConversations);
+      const conv = updatedConversations.get(currentConversation.id);
+      if (conv) {
+        updatedConversations.set(currentConversation.id, {
+          ...conv,
+          messages: [...conv.messages, userMessage],
+        });
+      }
+      return updatedConversations;
     });
 
-    // Send message through WebSocket
     sendMessage(JSON.stringify({
       type: 'message',
       content,
@@ -103,20 +120,37 @@ const App: React.FC = () => {
     }));
   };
 
+  const handleDeleteConversation = (id: string) => {
+    setConversations(prevConversations => {
+      const updatedConversations = new Map(prevConversations);
+      updatedConversations.delete(id);
+      return updatedConversations;
+    });
+    if (currentConversation && currentConversation.id === id) {
+      setCurrentConversation(null);
+    }
+  };
+
   return (
-    <div className="flex h-screen bg-gray-100">
+    <div className="flex h-screen bg-gray-100 w-full">
       <Sidebar
-        conversations={conversations}
+        conversations={Array.from(conversations.values())}
         currentConversation={currentConversation}
-        onSelectConversation={setCurrentConversation}
+        activeConversation={currentConversation ? currentConversation.id : null}
+        onSelectConversation={(id: string) => {
+          const selectedConversation = conversations.get(id) || null;
+          setCurrentConversation(selectedConversation);
+        }}
         onNewConversation={createNewConversation}
+        onDeleteConversation={handleDeleteConversation}
       />
       <ChatArea
         conversation={currentConversation}
         onSendMessage={handleSendMessage}
         showContext={showContext}
         onToggleContext={() => setShowContext(!showContext)}
-        connectionStatus={connectionStatus}
+        connectionStatus={isConnected ? "connected" : "disconnected"}
+        isStreaming={isStreaming}
       />
     </div>
   );

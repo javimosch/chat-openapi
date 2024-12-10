@@ -2,11 +2,12 @@ import React from 'react';
 import { Conversation } from '../types';
 
 interface SidebarProps {
-  conversations: Map<string, Conversation>;
+  conversations: Conversation[];
   activeConversation: string | null;
   onNewConversation: () => void;
   onDeleteConversation: (id: string) => void;
   onSelectConversation: (id: string) => void;
+  currentConversation: Conversation | null;
 }
 
 const Sidebar: React.FC<SidebarProps> = ({
@@ -15,9 +16,10 @@ const Sidebar: React.FC<SidebarProps> = ({
   onNewConversation,
   onDeleteConversation,
   onSelectConversation,
+  currentConversation,
 }) => {
   return (
-    <aside className="w-64 bg-white border-r border-gray-200 flex flex-col">
+    <aside className="w-64 bg-white border-r border-gray-200 flex flex-col shadow-lg">
       <div className="p-4 border-b border-gray-200">
         <button
           onClick={onNewConversation}
@@ -28,7 +30,7 @@ const Sidebar: React.FC<SidebarProps> = ({
       </div>
       
       <div className="flex-1 overflow-y-auto">
-        {Array.from(conversations.values())
+        {conversations
           .sort((a, b) => b.lastUpdated - a.lastUpdated)
           .map((conversation) => (
             <div

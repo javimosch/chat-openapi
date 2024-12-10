@@ -90,7 +90,20 @@ Example:
 ./chatapi export 550e8400-e29b-41d4-a716-446655440000 ~/exported_spec.yaml
 ```
 
-## Error Handling
+### WebSocket Chat Functionality
+
+The Chat-OpenAPI WebSocket service allows real-time interaction with the chat functionality. Users can send messages and receive responses that utilize context retrieved from the RAG service.
+
+#### How It Works:
+1. **Send a Message**: Users send a message to the WebSocket endpoint.
+2. **Context Retrieval**: The service retrieves relevant context based on the user's message.
+3. **Response Generation**: The context is combined with the user's message to generate a response using the OpenRouter service.
+4. **Receive Response**: The response is sent back to the user in real-time.
+
+#### Example Usage:
+To interact with the WebSocket service, connect to the WebSocket endpoint and send a message. The service will respond with a context-aware reply.
+
+### Error Handling
 
 The CLI provides clear error messages for common issues:
 - File not found
